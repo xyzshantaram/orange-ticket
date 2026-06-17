@@ -6,7 +6,7 @@ RUN corepack enable pnpm
 # ---- deps stage ----
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/core/package.json ./packages/core/
 COPY apps/server/package.json ./apps/server/
 COPY apps/client/package.json ./apps/client/
