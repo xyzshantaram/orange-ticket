@@ -172,22 +172,53 @@ export default function CreatePage() {
 
 function QuantityPicker({ onSubmit }: { onSubmit: (q: number) => void }) {
   const [value, setValue] = useState(1)
+
+  const batches = Object.keys(
+    JSON.parse(localStorage.getItem('orange-ticket-batches') ?? '{}')
+  ).reverse() // most recent first
+
   return (
     <div className="page centered">
       <h1>Create Vouchers</h1>
-      <label>
-        How many vouchers?
-        <input
-          type="number"
-          min={1}
-          max={10}
-          value={value}
-          onChange={(e) => setValue(Math.min(10, Math.max(1, Number(e.target.value))))}
-        />
-      </label>
-      <button className="btn-primary" onClick={() => onSubmit(value)}>
-        Generate
-      </button>
+      <div className="quantity-picker">
+        <label className="quantity-label">How many vouchers?</label>
+        <div className="quantity-controls">
+          <button
+            className="quantity-btn"
+            onClick={() => setValue((v) => Math.max(1, v - 1))}
+            disabled={value <= 1}
+          >−</button>
+          <input
+            className="quantity-input"
+            type="number"
+            min={1}
+            max={10}
+            value={value}
+            onChange={(e) => setValue(Math.min(10, Math.max(1, Number(e.target.value))))}
+          />
+          <button
+            className="quantity-btn"
+            onClick={() => setValue((v) => Math.min(10, v + 1))}
+            disabled={value >= 10}
+          >+</button>
+        </div>
+        <button className="btn-primary" onClick={() => onSubmit(value)}>
+          Generate
+        </button>
+      </div>
+
+      {batches.length > 0 && (
+        <div className="previous-batches">
+          <h2>Previous batches</h2>
+          <ul>
+            {batches.map((id) => (
+              <li key={id}>
+                <a href={`/batch/${id}`}>{id}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

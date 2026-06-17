@@ -14,9 +14,4 @@ export default defineConfig({
   worker: {
     format: 'iife',
   },
-  build: {
-    rollupOptions: {
-      external: ['argon2-browser'],
-    },
-  },
 })

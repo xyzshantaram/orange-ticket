@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Camera, ImageUp, Square } from 'lucide-react'
 import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { decodeKx, validateKaWord, buildKa, deriveFromSeed } from '@orange-ticket/core'
 import { argon2Hash } from '../argon2.js'
@@ -6,11 +7,22 @@ import { p2tr, Transaction } from '@scure/btc-signer'
 import { hex } from '@scure/base'
 
 type Step = 'scan-kx' | 'enter-ka' | 'sweep' | 'done'
+type FeeTier = 'low' | 'medium' | 'custom'
 
 interface UTXO {
   txid: string
   vout: number
   value: number
+}
+
+interface FeeEstimates {
+  low: number     // lowest in mempool (~1+ hour)
+  medium: number  // ~10 min (block target 6)
+}
+
+// Estimate vbytes for a P2TR key-path sweep tx
+function estimateVbytes(inputCount: number): number {
+  return Math.ceil(10.5 + inputCount * 57.5 + 43)
 }
 
 export default function ClaimPage() {
@@ -22,12 +34,34 @@ export default function ClaimPage() {
   const [privateKey, setPrivateKey] = useState<Uint8Array | null>(null)
   const [publicKey, setPublicKey] = useState<Uint8Array | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
+  const [btcPriceUsd, setBtcPriceUsd] = useState<number | null>(null)
   const [utxos, setUtxos] = useState<UTXO[]>([])
   const [deriving, setDeriving] = useState(false)
   const [destination, setDestination] = useState('')
+  const [feeEstimates, setFeeEstimates] = useState<FeeEstimates | null>(null)
+  const [feeTier, setFeeTier] = useState<FeeTier>('medium')
+  const [customFeeRate, setCustomFeeRate] = useState('')
   const [sweeping, setSweeping] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const word2Ref = useRef<HTMLInputElement>(null)
+
+  // Derive the effective sat/vbyte from current tier selection
+  function effectiveFeeRate(): number | null {
+    if (!feeEstimates) return null
+    if (feeTier === 'custom') {
+      const v = parseFloat(customFeeRate)
+      return isFinite(v) && v > 0 ? v : null
+    }
+    return feeEstimates[feeTier]
+  }
+
+  // Compute amountOut given a fee rate
+  function computeAmountOut(rate: number): number {
+    const totalIn = utxos.reduce((s, u) => s + u.value, 0)
+    return totalIn - Math.ceil(rate * estimateVbytes(utxos.length))
+  }
 
   async function handleDerive() {
     setDeriving(true)
@@ -42,13 +76,28 @@ export default function ClaimPage() {
       setPrivateKey(privKey)
       setPublicKey(pubKey)
 
-      // Fetch balance
-      const res = await fetch(`https://blockstream.info/api/address/${derived}`)
-      const data = await res.json()
-      const funded: number = data.chain_stats.funded_txo_sum + data.mempool_stats.funded_txo_sum
-      const spent: number = data.chain_stats.spent_txo_sum + data.mempool_stats.spent_txo_sum
+      // Fetch balance, fee estimates, and BTC price in parallel
+      const [addrRes, feeRes, priceRes] = await Promise.all([
+        fetch(`https://blockstream.info/api/address/${derived}`),
+        fetch('https://blockstream.info/api/fee-estimates'),
+        fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot'),
+      ])
+
+      const addrData = await addrRes.json()
+      const funded: number = addrData.chain_stats.funded_txo_sum + addrData.mempool_stats.funded_txo_sum
+      const spent: number = addrData.chain_stats.spent_txo_sum + addrData.mempool_stats.spent_txo_sum
       const bal = funded - spent
       setBalance(bal)
+
+      const fees = await feeRes.json() as Record<string, number>
+      setFeeEstimates({
+        low:    Math.ceil(fees['144'] ?? fees['1'] ?? 1),
+        medium: Math.ceil(fees['6']   ?? fees['1'] ?? 1),
+      })
+
+      const priceData = await priceRes.json() as { data?: { amount?: string } }
+      const price = parseFloat(priceData.data?.amount ?? '')
+      if (isFinite(price)) setBtcPriceUsd(price)
 
       if (bal > 0) {
         const utxoRes = await fetch(`https://blockstream.info/api/address/${derived}/utxo`)
@@ -65,20 +114,12 @@ export default function ClaimPage() {
 
   async function handleSweep() {
     if (!privateKey || !publicKey || !utxos.length) return
+    const rate = effectiveFeeRate()
+    if (!rate) return
     setSweeping(true)
     setError(null)
     try {
-      // Fetch fee estimate (sat/vbyte)
-      const feeRes = await fetch('https://blockstream.info/api/fee-estimates')
-      const fees = await feeRes.json() as Record<string, number>
-      const feeRate = Math.ceil(fees['1'] ?? 5)
-
-      const totalIn = utxos.reduce((s, u) => s + u.value, 0)
-      // Estimate vbytes: 10.5 overhead + 57.5 per P2TR key-path input + 43 P2TR output (worst case)
-      const estimatedSize = Math.ceil(10.5 + utxos.length * 57.5 + 43)
-      const fee = feeRate * estimatedSize
-      const amountOut = totalIn - fee
-
+      const amountOut = computeAmountOut(rate)
       if (amountOut <= 0) throw new Error('Balance too low to cover fees')
 
       const xOnlyPubKey = publicKey.slice(1)
@@ -125,8 +166,20 @@ export default function ClaimPage() {
     }
   }
 
+  function formatUsd(sats: number): string | null {
+    if (!btcPriceUsd) return null
+    const usd = (sats / 1e8) * btcPriceUsd
+    return usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`
+  }
+
+  const rate = effectiveFeeRate()
+  const amountOut = rate && utxos.length ? computeAmountOut(rate) : null
+  const feeSats = rate && utxos.length
+    ? Math.ceil(rate * estimateVbytes(utxos.length))
+    : null
+
   return (
-    <div className="page">
+    <div className="page page-centered-col">
       <h1>Claim Voucher</h1>
 
       {step === 'scan-kx' && (
@@ -142,6 +195,12 @@ export default function ClaimPage() {
               placeholder="word 1"
               value={word1}
               onChange={(e) => setWord1(e.target.value.toLowerCase())}
+              onKeyDown={(e) => {
+                if (e.key === ' ') {
+                  e.preventDefault()
+                  word2Ref.current?.focus()
+                }
+              }}
               onPaste={(e) => {
                 const text = e.clipboardData.getData('text').trim().toLowerCase()
                 const parts = text.split(/\s+/)
@@ -153,6 +212,7 @@ export default function ClaimPage() {
               }}
             />
             <input
+              ref={word2Ref}
               placeholder="word 2"
               value={word2}
               onChange={(e) => setWord2(e.target.value.toLowerCase())}
@@ -190,17 +250,30 @@ export default function ClaimPage() {
                   No funds found — check your passphrase, or this voucher may already have been claimed.
                 </span>
               ) : (
-                <strong>{balance} sats</strong>
+                <strong>
+                  {balance.toLocaleString()} sats
+                  {formatUsd(balance) && <span className="secondary"> ({formatUsd(balance)})</span>}
+                </strong>
               )}
             </p>
           )}
           {balance !== null && balance > 0 && (
             <>
+              <FeeSelector
+                estimates={feeEstimates}
+                tier={feeTier}
+                onTier={setFeeTier}
+                customRate={customFeeRate}
+                onCustomRate={setCustomFeeRate}
+                feeSats={feeSats}
+                amountOut={amountOut}
+                formatUsd={formatUsd}
+              />
               <ScanOrTypeAddress value={destination} onChange={setDestination} />
               {error && <p className="error">{error}</p>}
               <button
                 className="btn-primary"
-                disabled={!destination || sweeping}
+                disabled={!destination || sweeping || !rate || (amountOut !== null && amountOut <= 0)}
                 onClick={handleSweep}
               >
                 {sweeping ? 'Broadcasting…' : 'Sweep to My Wallet'}
@@ -223,6 +296,78 @@ export default function ClaimPage() {
             View on Blockstream
           </a>
         </div>
+      )}
+    </div>
+  )
+}
+
+function FeeSelector({
+  estimates,
+  tier,
+  onTier,
+  customRate,
+  onCustomRate,
+  feeSats,
+  amountOut,
+  formatUsd,
+}: {
+  estimates: FeeEstimates | null
+  tier: FeeTier
+  onTier: (t: FeeTier) => void
+  customRate: string
+  onCustomRate: (v: string) => void
+  feeSats: number | null
+  amountOut: number | null
+  formatUsd: (sats: number) => string | null
+}) {
+  const tiers: { key: FeeTier; label: string; time: string; rate: number | null }[] = [
+    { key: 'low',    label: 'Lowest fee',  time: '~1 hour',  rate: estimates?.low    ?? null },
+    { key: 'medium', label: '~10 minutes', time: '~10 min',  rate: estimates?.medium ?? null },
+    { key: 'custom', label: 'Custom',      time: '',         rate: null },
+  ]
+
+  return (
+    <div className="fee-selector">
+      <label className="fee-selector-label">Transaction fee</label>
+      <div className="fee-tiers">
+        {tiers.map(({ key, label, time, rate }) => (
+          <label key={key} className={`fee-tier${tier === key ? ' selected' : ''}`}>
+            <input
+              type="radio"
+              name="fee-tier"
+              checked={tier === key}
+              onChange={() => onTier(key)}
+            />
+            <span className="fee-tier-label">{label}</span>
+            {key !== 'custom' && (
+              <span className="fee-tier-rate">
+                {rate !== null ? `${rate} sat/vbyte` : '…'}
+              </span>
+            )}
+            {time && <span className="fee-tier-time">{time}</span>}
+          </label>
+        ))}
+      </div>
+      {tier === 'custom' && (
+        <input
+          type="number"
+          min="1"
+          step="0.1"
+          placeholder="sat/vbyte"
+          value={customRate}
+          onChange={(e) => onCustomRate(e.target.value)}
+          className="fee-custom-input"
+        />
+      )}
+      {feeSats !== null && amountOut !== null && (
+        <p className="fee-summary">
+          Fee: <strong>{feeSats.toLocaleString()} sats</strong>
+          {formatUsd(feeSats) && <span className="secondary"> ({formatUsd(feeSats)})</span>}
+          {' · '}
+          You receive: <strong>{amountOut > 0 ? amountOut.toLocaleString() : '—'} sats</strong>
+          {amountOut > 0 && formatUsd(amountOut) && <span className="secondary"> ({formatUsd(amountOut)})</span>}
+          {amountOut <= 0 && <span className="error"> (insufficient funds)</span>}
+        </p>
       )}
     </div>
   )
@@ -291,7 +436,6 @@ function ScanKxStep({
     const file = e.target.files?.[0]
     if (!file) return
     await decodeImageBlob(file)
-    // Reset so the same file can be re-selected
     e.target.value = ''
   }
 
@@ -310,22 +454,23 @@ function ScanKxStep({
   try { decodeKx(kxB64); kxValid = true } catch {}
 
   return (
-    <div className="step">
-      <h2>Scan K_x Barcode</h2>
-      <p>Open the card and scan the barcode inside.</p>
+    <div className="step scan-step">
+      <h2>Open the card</h2>
+      <p>Tear open the card and scan the secret inside, or take a photo of it.</p>
       <video
         ref={videoRef}
         style={{ display: scanning ? 'block' : 'none', width: '100%', maxWidth: 400 }}
       />
       <div className="scan-buttons">
-        {!scanning
-          ? <button className="btn-secondary" onClick={startCamera}>Open Camera</button>
-          : <button className="btn-secondary" onClick={stopScan}>Stop Camera</button>
-        }
-        {!scanning && (
+        {!scanning ? (
           <>
-            <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
-              Upload Image
+            <button className="scan-btn" onClick={startCamera}>
+              <Camera size={28} strokeWidth={1.5} />
+              <span>Open Camera</span>
+            </button>
+            <button className="scan-btn" onClick={() => fileInputRef.current?.click()}>
+              <ImageUp size={28} strokeWidth={1.5} />
+              <span>Upload Image</span>
             </button>
             <input
               ref={fileInputRef}
@@ -335,17 +480,33 @@ function ScanKxStep({
               onChange={handleFileUpload}
             />
           </>
+        ) : (
+          <button className="scan-btn scan-btn-stop" onClick={stopScan}>
+            <Square size={28} strokeWidth={1.5} />
+            <span>Stop Camera</span>
+          </button>
         )}
       </div>
       {scanError && <p className="error">{scanError}</p>}
-      <p>Or type the base64url string below:</p>
-      <input
-        placeholder="3q2-78r-ur4BAgMEBQYHCA — or paste an image"
-        value={kxB64}
-        onChange={(e) => setKxB64(e.target.value.trim())}
-        onPaste={handlePaste}
-        className={kxB64 && !kxValid ? 'invalid' : ''}
-      />
+      <p>Or enter it manually:</p>
+      <div className="input-with-action">
+        <input
+          placeholder="Can't scan? Type the code from inside the card"
+          value={kxB64}
+          onChange={(e) => setKxB64(e.target.value.trim())}
+          onPaste={handlePaste}
+          className={kxB64 && !kxValid ? 'invalid' : ''}
+        />
+        <button
+          className="btn-secondary input-action-btn"
+          onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText()
+              setKxB64(text.trim())
+            } catch {}
+          }}
+        >Paste</button>
+      </div>
       <button className="btn-primary" disabled={!kxValid} onClick={onNext}>
         Next
       </button>
