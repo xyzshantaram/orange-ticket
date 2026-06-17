@@ -1,0 +1,11 @@
+{
+  "name": "orange-ticket",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "build": "pnpm --filter @orange-ticket/core build && pnpm --filter client build && pnpm --filter server build",
+    "start": "pnpm build && node --experimental-sqlite apps/server/dist/index.js"
+  },
+  "workspaces": []
+}
