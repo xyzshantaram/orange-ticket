@@ -1,13 +1,28 @@
 import express from 'express'
 import { fileURLToPath } from 'node:url'
 import { join, dirname } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { v4 as uuidv4 } from 'uuid'
 import { decodeKx } from '@orange-ticket/core'
 import { insertBatch, getBatch, type Voucher } from './db.js'
-import { generatePdf, generateCardBackPdf, type CardBackRow } from './print.js'
+import { generatePdf, generateCardBackPdf } from './print.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CLIENT_DIST = join(__dirname, '../../client/dist')
+const CACHE_DIR = join(process.cwd(), '.ot-cache')
+const CARD_BACK_CACHE = join(CACHE_DIR, 'card-back.pdf')
+
+async function getCardBackPdf(): Promise<Buffer> {
+  try {
+    return await readFile(CARD_BACK_CACHE)
+  } catch {
+    // not cached yet — generate and save
+    const pdf = await generateCardBackPdf()
+    await mkdir(CACHE_DIR, { recursive: true })
+    await writeFile(CARD_BACK_CACHE, pdf)
+    return Buffer.from(pdf)
+  }
+}
 
 const app = express()
 app.use(express.json())
@@ -91,17 +106,12 @@ app.get('/api/batch/:batchId/pdf', async (req, res) => {
   }
 })
 
-app.post('/api/card-back', async (req, res) => {
-  const { rows } = req.body as { rows: CardBackRow[] }
-  if (!Array.isArray(rows) || rows.length > 10) {
-    res.status(400).json({ error: 'rows must be an array of up to 10 items' })
-    return
-  }
+app.get('/api/card-back', async (_req, res) => {
   try {
-    const pdf = await generateCardBackPdf(rows)
+    const pdf = await getCardBackPdf()
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', 'inline; filename="orange-ticket-card-back.pdf"')
-    res.send(Buffer.from(pdf))
+    res.send(pdf)
   } catch (err) {
     console.error('Card back PDF error:', err)
     res.status(500).json({ error: 'failed to generate card back PDF' })

@@ -82,15 +82,7 @@ export default function BatchPage() {
   const created = new Date(batch.created_at).toLocaleString()
 
   async function downloadCardBack() {
-    const rows = Array.from({ length: batch!.vouchers.length }, (_, i) => {
-      const ka = kaEntries.find((e) => e.index === i + 1)
-      return { index: i + 1, word1: ka?.word1, word2: ka?.word2 }
-    })
-    const res = await fetch('/api/card-back', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
-    })
+    const res = await fetch('/api/card-back')
     if (!res.ok) return
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)

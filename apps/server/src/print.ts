@@ -230,29 +230,19 @@ async function renderBarcodeSheet(vouchers: Voucher[]): Promise<Buffer> {
   return canvas.toBuffer('image/png')
 }
 
-export interface CardBackRow {
-  index: number
-  word1?: string
-  word2?: string
-  amount?: string
-  notes?: string
-}
-
-export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Array> {
+export async function generateCardBackPdf(): Promise<Uint8Array> {
   const canvas = createCanvas(A4_W, A4_H)
   const ctx = canvas.getContext('2d')
 
   ctx.fillStyle = 'white'
   ctx.fillRect(0, 0, A4_W, A4_H)
 
-  const REDEEM_URL = 'Go to orange-ticket.containers.shantaram.xyz to redeem'
-
   const PAD = Math.round(4 * MM)
   const LABEL_FS = Math.round(2.8 * MM)
-  const VALUE_FS = Math.round(4 * MM)
+  const NOTES_FS = Math.round(3.4 * MM)
+  const SATS_FS = Math.round(2.5 * MM)
 
   for (let i = 0; i < 10; i++) {
-    const row = rows.find(r => r.index === i + 1)
     const { x, y } = cellOrigin(i)
 
     // Cut guide
@@ -260,58 +250,84 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
     ctx.lineWidth = 1
     ctx.strokeRect(x, y, CELL_W, CELL_H)
 
-    // URL — bottom, full width, same size as address text on QR sheet
-    ctx.fillStyle = '#888888'
-    ctx.font = `${ADDR_FONT_SIZE}px monospace`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(REDEEM_URL, x + CELL_W / 2, y + CELL_H - LABEL_MARGIN)
-
-    // Top row: "Notes" label left, amount right
-    const topY = y + PAD
-    ctx.textBaseline = 'top'
-
-    ctx.fillStyle = '#888888'
-    ctx.font = `${LABEL_FS}px sans-serif`
+    // Passphrase row — left-aligned, blanks fill remaining width
+    const ppY = y + Math.round(16 * MM)
+    const ppLabelFS = Math.round(2.8 * MM)
+    const ppCapH = Math.round(2 * MM)
+    const ppLW = Math.round(0.6 * MM)
+    const ppGap = Math.round(2 * MM)
+    ctx.font = `${ppLabelFS}px sans-serif`
+    const ppLabelW = ctx.measureText('passphrase').width
+    const ppStartX = x + PAD
+    const ppAvailW = CELL_W - PAD - PAD - ppLabelW - ppGap - ppGap
+    const ppBlankW = Math.round(ppAvailW / 2)
+    ctx.fillStyle = '#222222'
     ctx.textAlign = 'left'
-    ctx.fillText('Notes', x + PAD, topY)
+    ctx.textBaseline = 'middle'
+    ctx.fillText('passphrase', ppStartX, ppY)
+    const ppX1 = ppStartX + ppLabelW + ppGap
+    const ppX2 = ppX1 + ppBlankW + ppGap
+    ctx.strokeStyle = '#999999'
+    ctx.lineWidth = ppLW
+    ctx.lineJoin = 'miter'
+    ctx.setLineDash([])
+    for (const bx of [ppX1, ppX2]) {
+      const baseY = ppY + Math.round(1.5 * MM)
+      ctx.beginPath()
+      ctx.moveTo(bx + ppLW, baseY - ppCapH)
+      ctx.lineTo(bx + ppLW, baseY)
+      ctx.lineTo(bx + ppBlankW, baseY)
+      ctx.lineTo(bx + ppBlankW, baseY - ppCapH)
+      ctx.stroke()
+    }
 
-    // Amount — label + value on the right
-    const amountStr = row?.amount ? `${row.amount} sats` : '_________ sats'
+    // "notes" label
+    const notesLabelY = y + Math.round(23 * MM)
+    ctx.fillStyle = '#999999'
+    ctx.font = `bold ${NOTES_FS}px sans-serif`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText('notes', x + PAD, notesLabelY)
+
+    // Amount blank — underline at normal Y, "sats" label 1mm higher
+    ctx.fillStyle = '#222222'
+    ctx.font = `${SATS_FS}px sans-serif`
     ctx.textAlign = 'right'
-    ctx.fillText(amountStr, x + CELL_W - PAD, topY)
+    const satsW = ctx.measureText(' sats').width
+    ctx.fillText('_________________', x + CELL_W - PAD - satsW, y + Math.round(7.7 * MM))
+    ctx.fillText('sats', x + CELL_W - PAD, y + Math.round(4.7 * MM))
 
-    // Note lines — 4 ruled lines, first starts right at topY + label height
-    const NOTE_LINE_GAP = Math.round(10 * MM) // 5mm taller than before (was 6mm)
-    const linesStartY = topY + Math.round(5 * MM)
+    // Note lines — 3 ruled lines
+    const NOTE_LINE_GAP = Math.round(6 * MM)
+    const linesStartY = y + Math.round(26 * MM)
     ctx.strokeStyle = '#cccccc'
     ctx.lineWidth = Math.round(0.3 * MM)
-    for (let l = 0; l < 4; l++) {
-      const lineY = linesStartY + l * NOTE_LINE_GAP + NOTE_LINE_GAP
+    for (let l = 0; l < 3; l++) {
+      const lineY = linesStartY + l * NOTE_LINE_GAP
       ctx.beginPath()
       ctx.moveTo(x + PAD, lineY)
       ctx.lineTo(x + CELL_W - PAD, lineY)
       ctx.stroke()
     }
 
-    // Notes text — bold, dark, sitting on the first line
-    const firstLineY = linesStartY + NOTE_LINE_GAP
-    const notesText = row?.notes ?? ''
-    if (notesText) {
-      ctx.fillStyle = '#111111'
-      ctx.font = `bold ${VALUE_FS}px sans-serif`
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'bottom'
-      ctx.fillText(notesText, x + PAD, firstLineY - Math.round(1 * MM))
-    }
-
-    // URL — just below the last ruled line
-    const lastLineY = linesStartY + 3 * NOTE_LINE_GAP + NOTE_LINE_GAP
-    ctx.fillStyle = '#888888'
+    // URL — "redeem at " grey, domain bold black, manually centered
+    const lastLineY = linesStartY + 2 * NOTE_LINE_GAP
+    const urlY = lastLineY + Math.round(3.7 * MM)
+    const prefix = 'redeem at '
+    const domain = 'orange-ticket.containers.shantaram.xyz'
     ctx.font = `${ADDR_FONT_SIZE}px monospace`
-    ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    ctx.fillText(REDEEM_URL, x + CELL_W / 2, lastLineY + Math.round(1.5 * MM))
+    const prefixW = ctx.measureText(prefix).width
+    ctx.font = `bold ${ADDR_FONT_SIZE}px monospace`
+    const domainW = ctx.measureText(domain).width
+    const urlStartX = x + Math.round((CELL_W - prefixW - domainW) / 2)
+    ctx.font = `${ADDR_FONT_SIZE}px monospace`
+    ctx.fillStyle = '#888888'
+    ctx.textAlign = 'left'
+    ctx.fillText(prefix, urlStartX, urlY)
+    ctx.font = `bold ${ADDR_FONT_SIZE}px monospace`
+    ctx.fillStyle = '#000000'
+    ctx.fillText(domain, urlStartX + prefixW, urlY)
   }
 
   const png = canvas.toBuffer('image/png')
