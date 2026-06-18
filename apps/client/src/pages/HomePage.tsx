@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { Ticket, ScanQrCode } from 'lucide-react'
 
 export default function HomePage() {
   return (
@@ -7,10 +8,10 @@ export default function HomePage() {
       <p className="home-tagline">Physical Bitcoin vouchers. No custodian. No account.</p>
       <div className="home-actions">
         <Link to="/create" className="btn-primary home-btn">
-          <span className="btn-icon">🎟</span> Create Vouchers
+          <Ticket size={20} strokeWidth={1.75} /> Create Vouchers
         </Link>
         <Link to="/claim" className="btn-secondary home-btn">
-          <span className="btn-icon">⚡</span> Claim a Voucher
+          <ScanQrCode size={20} strokeWidth={1.75} /> Claim a Voucher
         </Link>
       </div>
     </div>

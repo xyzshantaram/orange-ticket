@@ -218,8 +218,6 @@ a { color: #f7931a; }
   align-items: center;
 }
 
-.btn-icon { font-size: 1.1em; line-height: 1; }
-
 .input-with-action {
   display: flex;
   gap: 0.5rem;
