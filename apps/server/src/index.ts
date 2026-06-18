@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
 import { decodeKx } from '@orange-ticket/core'
 import { insertBatch, getBatch, type Voucher } from './db.js'
-import { generatePdf } from './print.js'
+import { generatePdf, generateCardBackPdf, type CardBackRow } from './print.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CLIENT_DIST = join(__dirname, '../../client/dist')
@@ -88,6 +88,23 @@ app.get('/api/batch/:batchId/pdf', async (req, res) => {
   } catch (err) {
     console.error('PDF generation error:', err)
     res.status(500).json({ error: 'failed to generate PDF' })
+  }
+})
+
+app.post('/api/card-back', async (req, res) => {
+  const { rows } = req.body as { rows: CardBackRow[] }
+  if (!Array.isArray(rows) || rows.length > 10) {
+    res.status(400).json({ error: 'rows must be an array of up to 10 items' })
+    return
+  }
+  try {
+    const pdf = await generateCardBackPdf(rows)
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline; filename="orange-ticket-card-back.pdf"')
+    res.send(Buffer.from(pdf))
+  } catch (err) {
+    console.error('Card back PDF error:', err)
+    res.status(500).json({ error: 'failed to generate card back PDF' })
   }
 })
 

@@ -230,7 +230,100 @@ async function renderBarcodeSheet(vouchers: Voucher[]): Promise<Buffer> {
   return canvas.toBuffer('image/png')
 }
 
-// Helper: load a data URL into a canvas Image
+export interface CardBackRow {
+  index: number
+  word1?: string
+  word2?: string
+  amount?: string  // free-form, e.g. "1000 sats" or "$1"
+  notes?: string
+}
+
+export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Array> {
+  const canvas = createCanvas(A4_W, A4_H)
+  const ctx = canvas.getContext('2d')
+
+  ctx.fillStyle = 'white'
+  ctx.fillRect(0, 0, A4_W, A4_H)
+
+  const URL_STR = 'orange-ticket.containers.shantaram.xyz'
+
+  const PAD = Math.round(4 * MM)
+  const LINE_H = Math.round(5.5 * MM)
+  const LABEL_FS = Math.round(2.8 * MM)
+  const VALUE_FS = Math.round(4 * MM)
+  const SMALL_FS = Math.round(2.5 * MM)
+
+  for (let i = 0; i < 10; i++) {
+    const row = rows.find(r => r.index === i + 1)
+    const { x, y } = cellOrigin(i)
+
+    // Cut guide
+    ctx.strokeStyle = '#cccccc'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x, y, CELL_W, CELL_H)
+
+    // Index — bottom right
+    ctx.fillStyle = '#bbbbbb'
+    ctx.font = `${LABEL_FONT_SIZE}px sans-serif`
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(String(i + 1), x + CELL_W - LABEL_MARGIN, y + CELL_H - LABEL_MARGIN)
+
+    // URL — bottom left, small
+    ctx.fillStyle = '#bbbbbb'
+    ctx.font = `${SMALL_FS}px monospace`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(URL_STR, x + PAD, y + CELL_H - LABEL_MARGIN)
+
+    // Content rows
+    let curY = y + PAD
+    ctx.textBaseline = 'top'
+
+    // Passphrase
+    ctx.fillStyle = '#888888'
+    ctx.font = `${LABEL_FS}px sans-serif`
+    ctx.textAlign = 'left'
+    ctx.fillText('Secret phrase', x + PAD, curY)
+    curY += Math.round(3.5 * MM)
+
+    const phrase = row?.word1 && row?.word2
+      ? `${row.word1}  ${row.word2}`
+      : '____________  ____________'
+    ctx.fillStyle = '#000000'
+    ctx.font = `bold ${VALUE_FS}px monospace`
+    ctx.fillText(phrase, x + PAD, curY)
+    curY += LINE_H + Math.round(2 * MM)
+
+    // Amount
+    ctx.fillStyle = '#888888'
+    ctx.font = `${LABEL_FS}px sans-serif`
+    ctx.fillText('Amount', x + PAD, curY)
+    curY += Math.round(3.5 * MM)
+
+    ctx.fillStyle = '#000000'
+    ctx.font = `bold ${VALUE_FS}px monospace`
+    ctx.fillText(row?.amount ?? '___________', x + PAD, curY)
+    curY += LINE_H + Math.round(2 * MM)
+
+    // Notes
+    ctx.fillStyle = '#888888'
+    ctx.font = `${LABEL_FS}px sans-serif`
+    ctx.fillText('Note', x + PAD, curY)
+    curY += Math.round(3.5 * MM)
+
+    ctx.fillStyle = '#000000'
+    ctx.font = `${VALUE_FS}px sans-serif`
+    ctx.fillText(row?.notes ?? '', x + PAD, curY)
+  }
+
+  const png = canvas.toBuffer('image/png')
+  const pdf = await PDFDocument.create()
+  const pngImage = await pdf.embedPng(png)
+  const page = pdf.addPage([pngImage.width, pngImage.height])
+  page.drawImage(pngImage, { x: 0, y: 0, width: pngImage.width, height: pngImage.height })
+  return pdf.save()
+}
 async function loadImage(dataUrl: string): ReturnType<typeof import('@napi-rs/canvas').loadImage> {
   const { loadImage } = await import('@napi-rs/canvas')
   return loadImage(dataUrl)

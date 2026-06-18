@@ -312,6 +312,12 @@ a { color: #f7931a; }
 
 .previous-batches li a:hover { text-decoration: underline; }
 
+.batch-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .fee-selector {
   display: flex;
   flex-direction: column;
