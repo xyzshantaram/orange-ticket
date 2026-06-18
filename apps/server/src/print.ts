@@ -282,11 +282,11 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
     ctx.textAlign = 'right'
     ctx.fillText(amountStr, x + CELL_W - PAD, topY)
 
-    // Note lines — 3 ruled lines below the label
+    // Note lines — 4 ruled lines below the label
     const linesStartY = topY + Math.round(5 * MM)
     ctx.strokeStyle = '#cccccc'
     ctx.lineWidth = Math.round(0.3 * MM)
-    for (let l = 0; l < 3; l++) {
+    for (let l = 0; l < 4; l++) {
       const lineY = linesStartY + l * NOTE_LINE_H + NOTE_LINE_H
       ctx.beginPath()
       ctx.moveTo(x + PAD, lineY)
@@ -302,6 +302,14 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
         ctx.textBaseline = 'top'
       }
     }
+
+    // URL — just below the last ruled line
+    const lastLineY = linesStartY + 3 * NOTE_LINE_H + NOTE_LINE_H
+    ctx.fillStyle = '#888888'
+    ctx.font = `${ADDR_FONT_SIZE}px monospace`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillText(REDEEM_URL, x + CELL_W / 2, lastLineY + Math.round(1.5 * MM))
   }
 
   const png = canvas.toBuffer('image/png')
