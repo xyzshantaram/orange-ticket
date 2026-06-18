@@ -261,13 +261,6 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
     ctx.lineWidth = 1
     ctx.strokeRect(x, y, CELL_W, CELL_H)
 
-    // Index — bottom right
-    ctx.fillStyle = '#bbbbbb'
-    ctx.font = `${LABEL_FONT_SIZE}px sans-serif`
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(String(i + 1), x + CELL_W - LABEL_MARGIN, y + CELL_H - LABEL_MARGIN)
-
     // URL — bottom, full width, same size as address text on QR sheet
     ctx.fillStyle = '#888888'
     ctx.font = `${ADDR_FONT_SIZE}px monospace`
