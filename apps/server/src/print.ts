@@ -250,7 +250,6 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
   const PAD = Math.round(4 * MM)
   const LABEL_FS = Math.round(2.8 * MM)
   const VALUE_FS = Math.round(4 * MM)
-  const NOTE_LINE_H = Math.round(6 * MM)  // height of each ruled note line
 
   for (let i = 0; i < 10; i++) {
     const row = rows.find(r => r.index === i + 1)
@@ -282,29 +281,32 @@ export async function generateCardBackPdf(rows: CardBackRow[]): Promise<Uint8Arr
     ctx.textAlign = 'right'
     ctx.fillText(amountStr, x + CELL_W - PAD, topY)
 
-    // Note lines — 4 ruled lines below the label
+    // Note lines — 4 ruled lines, first starts right at topY + label height
+    const NOTE_LINE_GAP = Math.round(10 * MM) // 5mm taller than before (was 6mm)
     const linesStartY = topY + Math.round(5 * MM)
     ctx.strokeStyle = '#cccccc'
     ctx.lineWidth = Math.round(0.3 * MM)
     for (let l = 0; l < 4; l++) {
-      const lineY = linesStartY + l * NOTE_LINE_H + NOTE_LINE_H
+      const lineY = linesStartY + l * NOTE_LINE_GAP + NOTE_LINE_GAP
       ctx.beginPath()
       ctx.moveTo(x + PAD, lineY)
       ctx.lineTo(x + CELL_W - PAD, lineY)
       ctx.stroke()
-      // Pre-fill notes text on first line if provided
-      if (l === 0 && row?.notes) {
-        ctx.fillStyle = '#000000'
-        ctx.font = `${VALUE_FS}px sans-serif`
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'bottom'
-        ctx.fillText(row.notes, x + PAD, lineY - Math.round(1 * MM))
-        ctx.textBaseline = 'top'
-      }
+    }
+
+    // Notes text — bold, dark, sitting on the first line
+    const firstLineY = linesStartY + NOTE_LINE_GAP
+    const notesText = row?.notes ?? ''
+    if (notesText) {
+      ctx.fillStyle = '#111111'
+      ctx.font = `bold ${VALUE_FS}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(notesText, x + PAD, firstLineY - Math.round(1 * MM))
     }
 
     // URL — just below the last ruled line
-    const lastLineY = linesStartY + 3 * NOTE_LINE_H + NOTE_LINE_H
+    const lastLineY = linesStartY + 3 * NOTE_LINE_GAP + NOTE_LINE_GAP
     ctx.fillStyle = '#888888'
     ctx.font = `${ADDR_FONT_SIZE}px monospace`
     ctx.textAlign = 'center'
